@@ -5,6 +5,7 @@ from datetime import datetime, time
 import time as time_sleep
 import os
 import hashlib
+import pytz  # Import the timezone library
 
 # --- App Configuration ---
 st.set_page_config(page_title="Timesheet & Attendance Tool", layout="wide")
@@ -77,7 +78,8 @@ def get_all_employees():
 def add_timesheet_entry(employee_id, project_name, task_description, hours_worked):
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.now()
+    IST = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(IST)
     cursor.execute("""
         INSERT INTO timesheet (employee_id, project_name, task_description, hours_worked, submission_date, submission_time)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -89,7 +91,8 @@ def add_timesheet_entry(employee_id, project_name, task_description, hours_worke
 
 def get_timesheet_entries_today():
     conn = get_db_connection()
-    today = datetime.now().date()
+    IST = pytz.timezone('Asia/Kolkata')
+    today = datetime.now(IST).date()
     query = """
     SELECT t.employee_id, e.name, t.project_name, t.task_description, t.hours_worked, t.submission_time
     FROM timesheet t
@@ -108,10 +111,10 @@ def get_attendance_status():
         return pd.DataFrame(columns=["Employee ID", "Name", "Status"])
 
     timesheet_today_df = get_timesheet_entries_today()
+    IST = pytz.timezone('Asia/Kolkata')
+    today = datetime.now(IST).date()
 
     status_list = []
-    today = datetime.now().date()
-
     for index, employee in employees_df.iterrows():
         emp_id = employee["employee_id"]
         emp_name = employee["name"]
@@ -127,12 +130,11 @@ def get_attendance_status():
             elif first_entry_time >= time(13, 0):
                 status = "Half-day"
             else:
-                status = "Present (Late)" # Or any other logic
+                status = "Present (Late)"
 
         status_list.append({"Employee ID": emp_id, "Name": emp_name, "Status": status})
 
     return pd.DataFrame(status_list)
-
 
 # --- Real-time Update Mechanism ---
 def get_last_update_time():
@@ -174,7 +176,11 @@ def login_page():
 def employee_view():
     st.header(f"Timesheet Entry for {st.session_state['employee_id']}")
 
-    now_time = datetime.now().time()
+    # --- THIS IS THE CORRECTED PART ---
+    IST = pytz.timezone('Asia/Kolkata')
+    now_time = datetime.now(IST).time()
+    # --- END OF CORRECTION ---
+    
     is_morning_window = time(8, 30) <= now_time <= time(10, 0)
     is_afternoon = now_time >= time(13, 0)
 
@@ -182,6 +188,7 @@ def employee_view():
         st.warning("You can only submit tasks between 8:30 AM - 10:00 AM or after 1:00 PM.")
         return
 
+    # This form will now appear correctly
     with st.form("task_form", clear_on_submit=True):
         project_name = st.text_input("Project Name")
         task_description = st.text_area("Task Description")
@@ -213,7 +220,6 @@ def admin_view():
     st.subheader("All Employees")
     st.dataframe(get_all_employees(), use_container_width=True)
 
-
 def manager_dashboard():
     st.header("Manager Dashboard")
     st.subheader("Today's Attendance Status")
@@ -235,22 +241,18 @@ def manager_dashboard():
 
     # Real-time update loop
     while True:
-        time_sleep.sleep(2) # Check every 2 seconds
+        time_sleep.sleep(2)
         last_update_time = get_last_update_time()
         if last_update_time > st.session_state.get('last_update_attendance', 0.0):
             st.session_state.last_update_attendance = last_update_time
             st.session_state.last_update_timesheet = last_update_time
             
-            # Update data
             st.session_state.attendance_data = get_attendance_status()
             st.session_state.timesheet_data = get_timesheet_entries_today()
 
-            # Rerender placeholders
             attendance_placeholder.dataframe(st.session_state.attendance_data, use_container_width=True)
             timesheet_placeholder.dataframe(st.session_state.timesheet_data, use_container_width=True)
-            # A small break to let Streamlit process the update
             time_sleep.sleep(0.1)
-
 
 # --- Main App Logic ---
 def main():
@@ -263,10 +265,6 @@ def main():
     if "admin_logged_in" not in st.session_state:
         st.session_state["admin_logged_in"] = False
 
-    # Sidebar for navigation
-    st.sidebar.title("Navigation")
-    
-    # Determine which main view to show
     if st.session_state.admin_logged_in:
         page = st.sidebar.selectbox("Admin Menu", ["Dashboard", "Manage Employees"])
         if st.sidebar.button("Logout Admin"):
@@ -285,7 +283,6 @@ def main():
             st.rerun()
 
     else:
-        # Show login options if no one is logged in
         role = st.sidebar.radio("Choose your portal", ["Employee Login", "Admin/Manager"])
         if role == "Employee Login":
             login_page()
