@@ -225,7 +225,7 @@ def admin_view():
     st.dataframe(get_all_employees(), use_container_width=True)
 
 def manager_dashboard():
-    st.header("Manager Dashboard")
+    st.header("Admin Dashboard")
     st.subheader("Today's Attendance Status")
     
     attendance_placeholder = st.empty()
