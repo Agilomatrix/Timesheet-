@@ -167,7 +167,7 @@ def login_page():
             if check_employee_credentials(employee_id, password):
                 st.session_state["logged_in"] = True
                 st.session_state["employee_id"] = employee_id
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid Employee ID or Password. Please contact your manager if you are not added.")
 
@@ -237,7 +237,7 @@ def manager_dashboard():
     while True:
         time_sleep.sleep(2) # Check every 2 seconds
         last_update_time = get_last_update_time()
-        if last_update_time > st.session_state.last_update_attendance:
+        if last_update_time > st.session_state.get('last_update_attendance', 0.0):
             st.session_state.last_update_attendance = last_update_time
             st.session_state.last_update_timesheet = last_update_time
             
@@ -248,6 +248,8 @@ def manager_dashboard():
             # Rerender placeholders
             attendance_placeholder.dataframe(st.session_state.attendance_data, use_container_width=True)
             timesheet_placeholder.dataframe(st.session_state.timesheet_data, use_container_width=True)
+            # A small break to let Streamlit process the update
+            time_sleep.sleep(0.1)
 
 
 # --- Main App Logic ---
@@ -258,34 +260,43 @@ def main():
 
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
+    if "admin_logged_in" not in st.session_state:
+        st.session_state["admin_logged_in"] = False
 
     # Sidebar for navigation
     st.sidebar.title("Navigation")
-    role = st.sidebar.radio("Choose your portal", ["Employee Login", "Admin/Manager"])
-
-    if role == "Admin/Manager":
-        password = st.sidebar.text_input("Enter Admin Password", type="password")
-        if st.sidebar.button("Access Admin Panel"):
-            if password == ADMIN_PASSWORD:
-                st.session_state['admin_logged_in'] = True
-            else:
-                st.sidebar.error("Incorrect password.")
+    
+    # Determine which main view to show
+    if st.session_state.admin_logged_in:
+        page = st.sidebar.selectbox("Admin Menu", ["Dashboard", "Manage Employees"])
+        if st.sidebar.button("Logout Admin"):
+            st.session_state.admin_logged_in = False
+            st.rerun()
         
-        if st.session_state.get('admin_logged_in', False):
-            page = st.sidebar.selectbox("Admin Menu", ["Dashboard", "Manage Employees"])
-            if page == "Dashboard":
-                manager_dashboard()
-            elif page == "Manage Employees":
-                admin_view()
+        if page == "Dashboard":
+            manager_dashboard()
+        elif page == "Manage Employees":
+            admin_view()
+    
+    elif st.session_state.logged_in:
+        employee_view()
+        if st.sidebar.button("Logout"):
+            st.session_state.logged_in = False
+            st.rerun()
+
     else:
-        # Employee Portal
-        if st.session_state["logged_in"]:
-            employee_view()
-            if st.sidebar.button("Logout"):
-                st.session_state["logged_in"] = False
-                st.experimental_rerun()
-        else:
+        # Show login options if no one is logged in
+        role = st.sidebar.radio("Choose your portal", ["Employee Login", "Admin/Manager"])
+        if role == "Employee Login":
             login_page()
+        elif role == "Admin/Manager":
+            password = st.sidebar.text_input("Enter Admin Password", type="password")
+            if st.sidebar.button("Access Admin Panel"):
+                if password == ADMIN_PASSWORD:
+                    st.session_state.admin_logged_in = True
+                    st.rerun()
+                else:
+                    st.sidebar.error("Incorrect password.")
 
 if __name__ == "__main__":
     main()
