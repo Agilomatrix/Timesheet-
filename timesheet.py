@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime, time
+from datetime import datetime, time, date
 import time as time_sleep
 import os
 import hashlib
@@ -9,6 +9,9 @@ import pytz  # Import the timezone library
 
 # --- App Configuration ---
 st.set_page_config(page_title="Timesheet & Attendance Tool", layout="wide")
+
+# --- Timezone Configuration ---
+IST = pytz.timezone('Asia/Kolkata')
 
 # --- Database Setup ---
 DB_FILE = "company_data.db"
@@ -29,7 +32,6 @@ def initialize_database():
     """Creates the necessary tables if they don't exist."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Employee table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +40,6 @@ def initialize_database():
             password TEXT NOT NULL
         )
     """)
-    # Timesheet table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS timesheet (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,15 +76,15 @@ def get_all_employees():
     return df
 
 # --- Timesheet and Attendance Logic ---
-def add_timesheet_entry(employee_id, project_name, task_description, hours_worked):
+def add_timesheet_entry(employee_id, project_name, task_description, hours_worked, entry_date):
+    """Saves a new timesheet entry with a specific date."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    IST = pytz.timezone('Asia/Kolkata')
     now = datetime.now(IST)
     cursor.execute("""
         INSERT INTO timesheet (employee_id, project_name, task_description, hours_worked, submission_date, submission_time)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (employee_id, project_name, task_description, hours_worked, now.date(), now.strftime("%H:%M:%S")))
+    """, (employee_id, project_name, task_description, hours_worked, entry_date, now.strftime("%H:%M:%S")))
     conn.commit()
     conn.close()
     with open(LAST_UPDATE_FILE, "w") as f:
@@ -91,10 +92,9 @@ def add_timesheet_entry(employee_id, project_name, task_description, hours_worke
 
 def get_timesheet_entries_today():
     conn = get_db_connection()
-    IST = pytz.timezone('Asia/Kolkata')
     today = datetime.now(IST).date()
     query = """
-    SELECT t.employee_id, e.name, t.project_name, t.task_description, t.hours_worked, t.submission_time
+    SELECT t.employee_id, e.name, t.project_name, t.task_description, t.hours_worked, t.submission_date, t.submission_time
     FROM timesheet t
     JOIN employees e ON t.employee_id = e.employee_id
     WHERE t.submission_date = ?
@@ -111,7 +111,6 @@ def get_attendance_status():
         return pd.DataFrame(columns=["Employee ID", "Name", "Status"])
 
     timesheet_today_df = get_timesheet_entries_today()
-    IST = pytz.timezone('Asia/Kolkata')
     today = datetime.now(IST).date()
 
     status_list = []
@@ -175,21 +174,23 @@ def login_page():
 
 def employee_view():
     st.header(f"Timesheet Entry for {st.session_state['employee_id']}")
-
-    # --- THIS IS THE CORRECTED PART ---
-    IST = pytz.timezone('Asia/Kolkata')
-    now_time = datetime.now(IST).time()
-    # --- END OF CORRECTION ---
     
+    now_time = datetime.now(IST).time()
+    today_date = datetime.now(IST).date()
+    
+    # Time-based restrictions for submission
     is_morning_window = time(8, 30) <= now_time <= time(10, 0)
     is_afternoon = now_time >= time(13, 0)
 
+    # Allow entry only during specific windows
     if not is_morning_window and not is_afternoon:
         st.warning("You can only submit tasks between 8:30 AM - 10:00 AM or after 1:00 PM.")
         return
 
-    # This form will now appear correctly
     with st.form("task_form", clear_on_submit=True):
+        # --- NEW DATE FIELD ADDED HERE ---
+        entry_date = st.date_input("Date", value=today_date)
+        
         project_name = st.text_input("Project Name")
         task_description = st.text_area("Task Description")
         hours_worked = st.number_input("Hours Worked", min_value=0.5, step=0.5)
@@ -197,7 +198,8 @@ def employee_view():
 
         if submitted:
             if project_name and task_description and hours_worked > 0:
-                add_timesheet_entry(st.session_state['employee_id'], project_name, task_description, hours_worked)
+                # Pass the selected date to the database function
+                add_timesheet_entry(st.session_state['employee_id'], project_name, task_description, hours_worked, entry_date)
                 st.success("Your task has been submitted successfully!")
             else:
                 st.error("Please fill out all fields.")
@@ -239,7 +241,6 @@ def manager_dashboard():
     timesheet_placeholder = st.empty()
     timesheet_placeholder.dataframe(st.session_state.timesheet_data, use_container_width=True)
 
-    # Real-time update loop
     while True:
         time_sleep.sleep(2)
         last_update_time = get_last_update_time()
@@ -260,10 +261,8 @@ def main():
 
     st.title("Company Timesheet and Attendance Portal")
 
-    if "logged_in" not in st.session_state:
-        st.session_state["logged_in"] = False
-    if "admin_logged_in" not in st.session_state:
-        st.session_state["admin_logged_in"] = False
+    if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
+    if "admin_logged_in" not in st.session_state: st.session_state["admin_logged_in"] = False
 
     if st.session_state.admin_logged_in:
         page = st.sidebar.selectbox("Admin Menu", ["Dashboard", "Manage Employees"])
@@ -271,21 +270,17 @@ def main():
             st.session_state.admin_logged_in = False
             st.rerun()
         
-        if page == "Dashboard":
-            manager_dashboard()
-        elif page == "Manage Employees":
-            admin_view()
+        if page == "Dashboard": manager_dashboard()
+        elif page == "Manage Employees": admin_view()
     
     elif st.session_state.logged_in:
         employee_view()
         if st.sidebar.button("Logout"):
             st.session_state.logged_in = False
             st.rerun()
-
     else:
         role = st.sidebar.radio("Choose your portal", ["Employee Login", "Admin/Manager"])
-        if role == "Employee Login":
-            login_page()
+        if role == "Employee Login": login_page()
         elif role == "Admin/Manager":
             password = st.sidebar.text_input("Enter Admin Password", type="password")
             if st.sidebar.button("Access Admin Panel"):
